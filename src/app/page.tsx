@@ -1,5 +1,4 @@
 
-      
 "use client";
 
 import { useState, useEffect, type ChangeEvent, type FormEvent, useRef } from 'react';
@@ -812,12 +811,8 @@ export default function AttendancePage() {
         </div>
       </div>
        <footer className="mt-8 text-center text-xs sm:text-sm text-muted-foreground">
-        <p>&copy; {pageLoadTime ? new Date().getFullYear() : 'Loading...'} ClassPonumaa?!?. All rights reserved. {pageLoadTime ? `(Loaded at ${pageLoadTime})` : ''}</p>
+        <p>&copy; {new Date().getFullYear()} ClassPonumaa?!?. All rights reserved. {pageLoadTime ? `(Loaded at ${pageLoadTime})` : ''}</p>
       </footer>
     </div>
   );
 }
-
-    
-
-    
