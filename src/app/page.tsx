@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, type ChangeEvent, type FormEvent, useRef } from 'react';
+import Image from 'next/image';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -691,8 +692,14 @@ export default function AttendancePage() {
         <div className="lg:w-1/2">
             <Card className="w-full shadow-xl rounded-lg overflow-hidden">
                 <CardHeader className="text-center bg-card p-6 border-b border-border">
-                <div className="mx-auto mb-3 p-3 rounded-full bg-primary text-primary-foreground w-fit shadow-md">
-                    <Ghost className="h-8 w-8" />
+                <div className="mx-auto mb-3 w-fit">
+                   <Image
+                      src="/icon.png"
+                      alt="Attendance Ally Logo"
+                      width={48}
+                      height={48}
+                      priority
+                   />
                 </div>
                 <CardTitle className="text-2xl sm:text-3xl font-bold text-primary">Attendance Ally</CardTitle>
                 <CardDescription className="text-muted-foreground pt-1 text-sm sm:text-base">
@@ -890,5 +897,7 @@ export default function AttendancePage() {
   );
 }
 
+
+    
 
     
