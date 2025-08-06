@@ -22,19 +22,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="scroll-smooth">
-      <body className={`${fontSans.variable} ${fontMono.variable} antialiased`}> {/* Updated font variables */}
-        {children}
-        <Toaster />
-      </body>
+    <html lang="en">
+      <head>
+        {/* Apple iOS support */}
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+
+        {/* PWA support */}
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="theme-color" content="#000000" />
+      </head>
+      <body>{children}</body>
     </html>
   );
-}
-
-    
+}    
