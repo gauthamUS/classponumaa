@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { AlertCircle, CheckCircle2, Minus, Plus, Ghost, Upload, Loader2, BrainCircuit, Calendar as CalendarIcon, BellOff, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Minus, Plus, Ghost, Upload, Loader2, BrainCircuit, Calendar as CalendarIcon, BellOff, RefreshCw, XCircle } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Separator } from '@/components/ui/separator';
 import { processSchedule, ProcessScheduleOutput } from '@/ai/flows/process-schedule-flow';
@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import { format, eachDayOfInterval, getDay, parse, isAfter, isValid } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 
 const ELIGIBILITY_THRESHOLD = 74.01;
@@ -48,10 +49,17 @@ type NonInstructionalDay = {
     reason: string;
 };
 
+const assessmentDates: { [key: string]: string } = {
+    'cat1': '13.08.2025',
+    'cat2': '30.09.2025',
+    'labfat': '07.11.2025',
+    'theoryfat': '14.11.2025'
+};
+
 
 export default function AttendancePage() {
   const { toast } = useToast();
-  const [courseName, setCourseName] = useState<string>('BCSE301L');
+  const [courseName, setCourseName] = useState<string>('');
   const [totalClassesInput, setTotalClassesInput] = useState<string>('');
   const [attendedClassesInput, setAttendedClassesInput] = useState<string>('');
   const [upcomingClassesCountFormInput, setUpcomingClassesCountFormInput] = useState<string>(''); 
@@ -75,6 +83,7 @@ export default function AttendancePage() {
   const [endDate, setEndDate] = useState<Date | undefined>();
   const [semesterEndDate, setSemesterEndDate] = useState<Date | undefined>();
   const [extraInstructionalDays, setExtraInstructionalDays] = useState<string>("");
+  const [selectedAssessment, setSelectedAssessment] = useState<string>('');
   
   const [weeklyTimetableFile, setWeeklyTimetableFile] = useState<File | null>(null);
   const [academicCalendarFile, setAcademicCalendarFile] = useState<File | null>(null);
@@ -85,9 +94,10 @@ export default function AttendancePage() {
   const [nonInstructionalDays, setNonInstructionalDays] = useState<NonInstructionalDay[]>([]);
   const weeklyFileInputRef = useRef<HTMLInputElement>(null);
   const academicCalendarInputRef = useRef<HTMLInputElement>(null);
+  const [isClient, setIsClient] = useState(false);
 
   // Helper to parse date strings from AI, which might be "MMM dd, yyyy"
-  const parseDate = (dateString: string, referenceDate: Date): Date | null => {
+  const parseDate = (dateString: string, referenceDate?: Date): Date | null => {
     if (!dateString) return null;
 
     const formats = [
@@ -103,7 +113,6 @@ export default function AttendancePage() {
         const ref = referenceDate || new Date();
         const parsed = parse(dateString.trim(), fmt, ref);
         if (isValid(parsed)) {
-            // If format doesn't include year, and parsed date is in the past, assume next year
             if (!/yyyy/.test(fmt) && parsed < ref) {
                parsed.setFullYear(ref.getFullYear() + 1);
             }
@@ -117,7 +126,9 @@ export default function AttendancePage() {
 
 
   useEffect(() => {
+    // This now runs only on the client, preventing a hydration mismatch.
     setPageLoadTime(new Date().toLocaleTimeString());
+    setIsClient(true);
   }, []);
   
   useEffect(() => {
@@ -163,9 +174,7 @@ export default function AttendancePage() {
            const nonInstructionalDateSet = new Set<string>();
             nonInstructionalDays.forEach(item => {
                 const dateStr = item.date.trim();
-                // E.g. "16.08.2025 to 23.08.2025" or "Sep 10-15, 2024" or "15.08.2025"
                 const rangeParts = dateStr.split(/\s+to\s+|-/);
-
                 try {
                     if (rangeParts.length > 1) { // It's a range
                         const refDate = startDate || new Date();
@@ -173,7 +182,8 @@ export default function AttendancePage() {
                         let endDateOfRange = parseDate(rangeParts[1], refDate);
 
                         if (startDateOfRange && endDateOfRange) {
-                            if (endDateOfRange < startDateOfRange) { // e.g. Sep 10-15
+                            // Handle cases like "Sep 10-15" where year is missing for end date
+                            if (endDateOfRange < startDateOfRange) { 
                                 endDateOfRange.setMonth(startDateOfRange.getMonth());
                                 if(endDateOfRange < startDateOfRange) {
                                     endDateOfRange.setFullYear(startDateOfRange.getFullYear() + 1);
@@ -243,6 +253,35 @@ export default function AttendancePage() {
       setSemesterEndDate(undefined);
       setStartDate(undefined);
       setEndDate(undefined);
+      setSelectedAssessment('');
+  };
+  
+  const handleResetAll = () => {
+    // Reset basic inputs
+    setCourseName('');
+    setTotalClassesInput('');
+    setAttendedClassesInput('');
+    setUpcomingClassesCountFormInput('');
+    setExtraInstructionalDays('');
+    
+    // Reset files
+    setWeeklyTimetableFile(null);
+    setAcademicCalendarFile(null);
+    if (weeklyFileInputRef.current) weeklyFileInputRef.current.value = '';
+    if (academicCalendarInputRef.current) academicCalendarInputRef.current.value = '';
+
+    // Reset calculation results
+    setError(null);
+    resetCurrentResults();
+    resetFutureScenario();
+    
+    // Reset AI processing results
+    resetAiResults();
+    
+    toast({
+        title: "Form Cleared",
+        description: "All inputs and results have been reset.",
+    });
   };
 
   const handleCalculate = (e: FormEvent<HTMLFormElement>) => {
@@ -404,8 +443,11 @@ export default function AttendancePage() {
             const refDate = startDate || new Date();
             const lastDay = parseDate(result.lastInstructionalDay, refDate);
             if (lastDay && isValid(lastDay)) {
-                setEndDate(lastDay);
+                // Don't set end date from here anymore, use it as the max date
                 setSemesterEndDate(lastDay);
+                 if (!endDate) {
+                    setEndDate(lastDay);
+                }
             }
         }
 
@@ -431,6 +473,7 @@ export default function AttendancePage() {
         });
     } else {
         setEndDate(date);
+        setSelectedAssessment(''); // Reset dropdown if manual date is picked
     }
   };
 
@@ -446,211 +489,50 @@ export default function AttendancePage() {
     }
   };
 
+  const handleAssessmentChange = (value: string) => {
+    setSelectedAssessment(value);
+    if (!value) {
+      return;
+    }
+    const dateStr = assessmentDates[value];
+    if (dateStr) {
+      const newEndDate = parseDate(dateStr);
+      if (newEndDate && isValid(newEndDate)) {
+        if (semesterEndDate && isAfter(newEndDate, semesterEndDate)) {
+            toast({
+                variant: "destructive",
+                title: "Invalid Date",
+                description: `You cannot select a date after the last instructional day (${format(semesterEndDate, "PPP")}).`,
+            });
+        } else {
+            setEndDate(newEndDate);
+        }
+      }
+    }
+  };
+
 
   return (
     <div role="main" className="flex min-h-screen flex-col items-center justify-center bg-background p-4 sm:p-6 selection:bg-primary/20 selection:text-primary">
       <div className="w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-8">
         <div className="lg:w-1/2">
             <Card className="w-full shadow-xl rounded-lg overflow-hidden">
-                <CardHeader className="text-center bg-card p-6 border-b border-border">
-                <div className="mx-auto mb-3 p-3 rounded-full bg-primary text-primary-foreground w-fit shadow-md">
-                    <Ghost className="h-8 w-8" />
-                </div>
-                <CardTitle className="text-2xl sm:text-3xl font-bold text-primary">Attendance Ally</CardTitle>
-                <CardDescription className="text-muted-foreground pt-1 text-sm sm:text-base">
-                    Check your exam eligibility based on attendance. (75% criteria met if actual >= 74.01%)
-                </CardDescription>
-                </CardHeader>
-                <CardContent className="p-6 bg-card">
-                <form onSubmit={handleCalculate} className="space-y-5">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="courseName" className="text-foreground font-medium text-sm">Course Name / Code</Label>
-                      <Input
-                        id="courseName"
-                        type="text"
-                        placeholder="e.g., BCSE301L"
-                        value={courseName}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setCourseName(e.target.value)}
-                        className="bg-secondary/70 border-border focus:ring-primary focus:border-primary text-base py-2.5"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                    <Label htmlFor="totalClassesHeld" className="text-foreground font-medium text-sm">Total Classes Held</Label>
-                    <Input
-                        id="totalClassesHeld"
-                        type="number"
-                        placeholder="e.g., 80"
-                        value={totalClassesInput}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setTotalClassesInput(e.target.value)}
-                        min="1"
-                        required
-                        className="bg-secondary/70 border-border focus:ring-primary focus:border-primary text-base py-2.5"
-                    />
-                    </div>
-                    <div className="space-y-1.5">
-                    <Label htmlFor="attendedClassesTillDate" className="text-foreground font-medium text-sm">Classes Attended (till date)</Label>
-                    <Input
-                        id="attendedClassesTillDate"
-                        type="number"
-                        placeholder="e.g., 60"
-                        value={attendedClassesInput}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setAttendedClassesInput(e.target.value)}
-                        min="0"
-                        required
-                        className="bg-secondary/70 border-border focus:ring-primary focus:border-primary text-base py-2.5"
-                    />
-                    </div>
-                    <div className="space-y-1.5">
-                    <Label htmlFor="classesLeftForDebar" className="text-foreground font-medium text-sm">Classes left before Debar calculation</Label>
-                    <Input
-                        id="classesLeftForDebar" 
-                        type="number"
-                        placeholder="e.g., 10"
-                        value={upcomingClassesCountFormInput} 
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => setUpcomingClassesCountFormInput(e.target.value)}
-                        min="0"
-                        readOnly={selectedDays && selectedDays.length > 0}
-                        className={`bg-secondary/70 border-border focus:ring-primary focus:border-primary text-base py-2.5 ${selectedDays && selectedDays.length > 0 ? 'cursor-not-allowed' : ''}`}
-                    />
-                    </div>
-                    {error && (
-                    <p id="formError" role="alert" className="text-sm font-medium text-destructive flex items-center gap-2 p-3 bg-destructive/10 rounded-md border border-destructive/30">
-                        <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                        {error}
-                    </p>
-                    )}
-                    <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 text-base rounded-md shadow-md hover:shadow-lg transition-all duration-150 ease-in-out active:scale-[0.98]">
-                    Calculate Eligibility
-                    </Button>
-                </form>
-                </CardContent>
-
-                {currentPercentage !== null && (
-                <CardFooter 
-                    className="flex flex-col items-center space-y-4 p-6 bg-card border-t border-border animate-in fade-in-0 zoom-in-95 duration-500"
-                >
-                    <div className="w-full text-center">
-                        <p className="text-base sm:text-lg font-semibold text-foreground">Your Current Attendance Percentage:</p>
-                        <p className="text-4xl sm:text-5xl font-bold text-primary tabular-nums my-1">
-                        {currentPercentage.toFixed(2)}%
-                        </p>
-                        <Progress value={currentPercentage} className="mt-2.5 h-2.5 sm:h-3 [&>div]:bg-primary rounded-full" aria-label={`Current Attendance: ${currentPercentage.toFixed(2)}%`} />
-                    </div>
-
-                    {currentEligible !== null && (
-                    <div
-                        role="status"
-                        aria-live="polite"
-                        className={`mt-4 p-3 sm:p-4 rounded-md w-full text-center text-base sm:text-lg font-semibold transition-all duration-300 ease-in-out shadow-sm
-                        ${ currentEligible 
-                            ? 'bg-accent/10 text-accent border border-accent/30' 
-                            : 'bg-destructive/10 text-destructive border border-destructive/30'
-                        }`}
-                    >
-                        {currentEligible ? (
-                        <div className="flex items-center justify-center gap-2">
-                            <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6 text-accent flex-shrink-0" />
-                            <span>Congratulations! You are currently eligible for exams.</span>
-                        </div>
-                        ) : (
-                        <div className="flex items-center justify-center gap-2">
-                            <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 text-destructive flex-shrink-0" />
-                            <span>Sorry, you need {ELIGIBILITY_THRESHOLD.toFixed(2)}% attendance. You are currently not eligible.</span>
-                        </div>
-                        )}
-                    </div>
-                    )}
-                </CardFooter>
-                )}
-
-                {currentPercentage !== null && classesLeftForDebar !== null && classesLeftForDebar > 0 && ( 
-                <CardContent className="p-6 bg-card border-t border-border animate-in fade-in-0 zoom-in-95 duration-500">
-                    <CardHeader className="p-0 mb-4 text-center">
-                    <CardTitle className="text-xl sm:text-2xl font-bold text-primary">Future Attendance Scenario</CardTitle>
-                    <CardDescription className="text-muted-foreground pt-1 text-sm">
-                        For the next {classesLeftForDebar} class(es) before debar:
-                    </CardDescription>
-                    </CardHeader>
-                    <div className="space-y-4">
-                    <div className="space-y-1.5">
-                        <Label htmlFor="attendingFuture" className="text-foreground font-medium text-sm">
-                        Classes you will attend (out of {classesLeftForDebar}):
-                        </Label>
-                        <div className="flex items-center justify-center gap-3">
-                        <Button 
-                            variant="outline" 
-                            size="icon" 
-                            onClick={handleDecrementAttendingFuture} 
-                            disabled={attendingFutureClassesCount === null || attendingFutureClassesCount <= 0}
-                            aria-label="Decrease future classes attended"
-                        >
-                            <Minus className="h-4 w-4" />
-                        </Button>
-                        <span className="text-lg font-semibold text-primary tabular-nums min-w-[3ch] text-center">
-                            {attendingFutureClassesCount ?? '-'}
-                        </span>
-                        <Button 
-                            variant="outline" 
-                            size="icon" 
-                            onClick={handleIncrementAttendingFuture} 
-                            disabled={attendingFutureClassesCount === null || classesLeftForDebar === null || attendingFutureClassesCount >= classesLeftForDebar}
-                            aria-label="Increase future classes attended"
-                        >
-                            <Plus className="h-4 w-4" />
-                        </Button>
-                        </div>
-                    </div>
-
-                    {projectedFuturePercentage !== null && (
-                        <div className="mt-4 space-y-3 text-center">
-                        <p className="text-foreground">
-                            If you attend <strong className="text-primary">{attendingFutureClassesCount}</strong> and miss <strong className="text-destructive">{classesLeftForDebar - (attendingFutureClassesCount ?? 0)}</strong> class(es):
-                        </p>
-                        <div>
-                            <p className="text-base sm:text-lg font-semibold text-foreground">Your Projected Attendance:</p>
-                            <p className="text-3xl sm:text-4xl font-bold text-primary tabular-nums my-1">
-                            {projectedFuturePercentage.toFixed(2)}%
-                            </p>
-                            <Progress value={projectedFuturePercentage} className="mt-2 h-2 sm:h-2.5 [&>div]:bg-primary rounded-full" aria-label={`Projected Attendance: ${projectedFuturePercentage.toFixed(2)}%`} />
-                        </div>
-                        
-                        {projectedFutureEligible !== null && (
-                            <div
-                            role="status"
-                            aria-live="polite"
-                            className={`mt-3 p-3 rounded-md w-full text-center text-base font-semibold
-                                ${ projectedFutureEligible 
-                                ? 'bg-accent/10 text-accent border border-accent/30' 
-                                : 'bg-destructive/10 text-destructive border border-accent/30'
-                                }`}
-                            >
-                            {projectedFutureEligible ? (
-                                <div className="flex items-center justify-center gap-2">
-                                <CheckCircle2 className="h-5 w-5 text-accent flex-shrink-0" />
-                                <span>You will be eligible for exams.</span>
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-center gap-2">
-                                <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
-                                <span>You will not be eligible for exams.</span>
-                                </div>
-                            )}
-                            </div>
-                        )}
-                        </div>
-                    )}
-                    </div>
-                </CardContent>
-                )}
-            </Card>
-        </div>
-        <div className="lg:w-1/2">
-             <Card className="w-full shadow-xl rounded-lg overflow-hidden">
                 <CardHeader>
                     <CardTitle>Automate Class Selection</CardTitle>
                     <CardDescription>Upload your weekly timetable and academic calendar to automatically select class days.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                     <div className="space-y-2">
+                      <Label htmlFor="courseName" className="text-foreground font-medium text-sm">Course Name / Code</Label>
+                      <Input
+                        id="courseName"
+                        type="text"
+                        placeholder="e.g.,BCSE301L-TH/BCSE301P-LO"
+                        value={courseName}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => setCourseName(e.target.value)}
+                        className="bg-secondary/70 border-border focus:ring-primary focus:border-primary"
+                      />
+                    </div>
                     <div className="space-y-2">
                         <Label htmlFor="weekly-timetable">1. Weekly Timetable</Label>
                         <Input 
@@ -731,32 +613,29 @@ export default function AttendancePage() {
                               />
                             </PopoverContent>
                           </Popover>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant={"outline"}
-                                className={cn(
-                                  "w-full justify-start text-left font-normal",
-                                  !endDate && "text-muted-foreground"
-                                )}
-                              >
-                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                {endDate ? format(endDate, "PPP") : <span>Pick an end date</span>}
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0">
-                              <Calendar
-                                mode="single"
-                                selected={endDate}
-                                onSelect={handleEndDateChange}
-                                initialFocus
-                                disabled={isProcessingSchedule || (semesterEndDate ? { after: semesterEndDate, before: startDate } : { before: startDate })}
-                              />
-                            </PopoverContent>
-                          </Popover>
+                          {endDate && (
+                             <div className="flex items-center justify-center p-2 border rounded-md text-sm">
+                                {`End Date: ${format(endDate, "PPP")}`}
+                             </div>
+                          )}
                         </div>
                     </div>
                     
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">Select DEADLINE for DEBAR Calculation</div>
+                        <Select onValueChange={handleAssessmentChange} value={selectedAssessment} disabled={isProcessingSchedule}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select an assessment..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="cat1">CAT-I</SelectItem>
+                                <SelectItem value="cat2">CAT-II</SelectItem>
+                                <SelectItem value="labfat">LAB FAT</SelectItem>
+                                <SelectItem value="theoryfat">THEORY FAT</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
                     <div className="space-y-2">
                         <Label htmlFor="extra-instructional-days">4. Extra Instructional Days</Label>
                          <div className="flex items-center gap-2">
@@ -765,7 +644,7 @@ export default function AttendancePage() {
                               placeholder="e.g., 23.11.2024 Friday Day Order. Enter one per line."
                               value={extraInstructionalDays}
                               onChange={(e) => setExtraInstructionalDays(e.target.value)}
-                              className="bg-secondary/70 border-border focus:ring-primary focus:border-primary text-base flex-grow"
+                              className="bg-secondary/70 border-border focus:ring-primary focus:border-primary flex-grow"
                             />
                             <Button 
                               variant="outline" 
@@ -787,7 +666,7 @@ export default function AttendancePage() {
                     <CardDescription>The calendar below highlights your automatically selected class dates.</CardDescription>
                 </CardHeader>
                 <CardContent className="flex justify-center">
-                    <Calendar
+                    {isClient && <Calendar
                         mode="multiple"
                         selected={selectedDays}
                         onSelect={setSelectedDays}
@@ -796,7 +675,7 @@ export default function AttendancePage() {
                         modifiers={{
                            nonInstructional: nonInstructionalDays.flatMap(day => {
                                 if (day.date.includes('-')) return [];
-                                const parsedDate = parseDate(day.date, new Date());
+                                const parsedDate = parseDate(day.date);
                                 return parsedDate && isValid(parsedDate) ? [parsedDate] : [];
                            }),
                            semesterEnd: semesterEndDate,
@@ -805,9 +684,203 @@ export default function AttendancePage() {
                             nonInstructional: { textDecoration: 'line-through', color: 'hsl(var(--muted-foreground))' },
                             semesterEnd: { color: 'hsl(var(--destructive))', fontWeight: 'bold' }
                         }}
-                    />
+                    />}
                 </CardContent>
              </Card>
+        </div>
+        <div className="lg:w-1/2">
+            <Card className="w-full shadow-xl rounded-lg overflow-hidden">
+                <CardHeader className="text-center bg-card p-6 border-b border-border">
+                <div className="mx-auto mb-3 p-3 rounded-full bg-primary text-primary-foreground w-fit shadow-md">
+                    <Ghost className="h-8 w-8" />
+                </div>
+                <CardTitle className="text-2xl sm:text-3xl font-bold text-primary">Attendance Ally</CardTitle>
+                <CardDescription className="text-muted-foreground pt-1 text-sm sm:text-base">
+                    Check your exam eligibility based on attendance. (75% criteria met if actual >= 74.01%)
+                </CardDescription>
+                </CardHeader>
+                <CardContent className="p-6 bg-card">
+                <form onSubmit={handleCalculate} className="space-y-5">
+                    
+                    <div className="space-y-2">
+                    <Label htmlFor="totalClassesHeld" className="text-foreground font-medium text-sm">Total Classes Held</Label>
+                    <Input
+                        id="totalClassesHeld"
+                        type="number"
+                        placeholder="e.g., 80"
+                        value={totalClassesInput}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => setTotalClassesInput(e.target.value)}
+                        min="1"
+                        required
+                        className="bg-secondary/70 border-border focus:ring-primary focus:border-primary"
+                    />
+                    </div>
+                    <div className="space-y-2">
+                    <Label htmlFor="attendedClassesTillDate" className="text-foreground font-medium text-sm">Classes Attended (till date)</Label>
+                    <Input
+                        id="attendedClassesTillDate"
+                        type="number"
+                        placeholder="e.g., 60"
+                        value={attendedClassesInput}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => setAttendedClassesInput(e.target.value)}
+                        min="0"
+                        required
+                        className="bg-secondary/70 border-border focus:ring-primary focus:border-primary"
+                    />
+                    </div>
+                    <div className="space-y-2">
+                    <Label htmlFor="classesLeftForDebar" className="text-foreground font-medium text-sm">Classes left before Debar calculation</Label>
+                    <Input
+                        id="classesLeftForDebar" 
+                        type="number"
+                        placeholder="e.g., 10"
+                        value={upcomingClassesCountFormInput} 
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => setUpcomingClassesCountFormInput(e.target.value)}
+                        min="0"
+                        readOnly={selectedDays && selectedDays.length > 0}
+                        className={`bg-secondary/70 border-border focus:ring-primary focus:border-primary ${selectedDays && selectedDays.length > 0 ? 'cursor-not-allowed' : ''}`}
+                    />
+                    </div>
+                    {error && (
+                    <p id="formError" role="alert" className="text-sm font-medium text-destructive flex items-center gap-2 p-3 bg-destructive/10 rounded-md border border-destructive/30">
+                        <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                        {error}
+                    </p>
+                    )}
+                    <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold py-3 text-base rounded-md shadow-md hover:shadow-lg transition-all duration-150 ease-in-out active:scale-[0.98]">
+                    Calculate Eligibility
+                    </Button>
+                </form>
+                </CardContent>
+
+                {currentPercentage !== null && (
+                <CardFooter 
+                    className="flex flex-col items-center space-y-4 p-6 bg-card border-t border-border animate-in fade-in-0 zoom-in-95 duration-500"
+                >
+                    <div className="w-full text-center">
+                        <p className="text-base sm:text-lg font-semibold text-foreground">Your Current Attendance Percentage:</p>
+                        <p className="text-4xl sm:text-5xl font-bold text-primary tabular-nums my-1">
+                        {currentPercentage.toFixed(2)}%
+                        </p>
+                        <Progress value={currentPercentage} className="mt-2.5 h-2.5 sm:h-3 [&>div]:bg-primary rounded-full" aria-label={`Current Attendance: ${currentPercentage.toFixed(2)}%`} />
+                    </div>
+
+                    {currentEligible !== null && (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        className={`mt-4 p-3 sm:p-4 rounded-md w-full text-center text-base sm:text-lg font-semibold transition-all duration-300 ease-in-out shadow-sm
+                        ${ currentEligible 
+                            ? 'bg-accent/10 text-accent border border-accent/30' 
+                            : 'bg-destructive/10 text-destructive border border-destructive/30'
+                        }`}
+                    >
+                        {currentEligible ? (
+                        <div className="flex items-center justify-center gap-2">
+                            <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6 text-accent flex-shrink-0" />
+                            <span>Congratulations! You are currently eligible for exams.</span>
+                        </div>
+                        ) : (
+                        <div className="flex items-center justify-center gap-2">
+                            <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 text-destructive flex-shrink-0" />
+                            <span>Sorry, you need {ELIGIBILITY_THRESHOLD.toFixed(2)}% attendance. You are currently not eligible.</span>
+                        </div>
+                        )}
+                    </div>
+                    )}
+                </CardFooter>
+                )}
+
+                {currentPercentage !== null && classesLeftForDebar !== null && classesLeftForDebar > 0 && ( 
+                <CardContent className="p-6 bg-card border-t border-border animate-in fade-in-0 zoom-in-95 duration-500">
+                    <CardHeader className="p-0 mb-4 text-center">
+                    <CardTitle className="text-xl sm:text-2xl font-bold text-primary">Future Attendance Scenario</CardTitle>
+                    <CardDescription className="text-muted-foreground pt-1 text-sm">
+                        For the next {classesLeftForDebar} class(es) before debar:
+                    </CardDescription>
+                    </CardHeader>
+                    <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="attendingFuture" className="text-foreground font-medium text-sm">
+                        Classes you will attend (out of {classesLeftForDebar}):
+                        </Label>
+                        <div className="flex items-center justify-center gap-3">
+                        <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={handleDecrementAttendingFuture} 
+                            disabled={attendingFutureClassesCount === null || attendingFutureClassesCount <= 0}
+                            aria-label="Decrease future classes attended"
+                        >
+                            <Minus className="h-4 w-4" />
+                        </Button>
+                        <span className="text-lg font-semibold text-primary tabular-nums min-w-[3ch] text-center">
+                            {attendingFutureClassesCount ?? '-'}
+                        </span>
+                        <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={handleIncrementAttendingFuture} 
+                            disabled={attendingFutureClassesCount === null || classesLeftForDebar === null || attendingFutureClassesCount >= classesLeftForDebar}
+                            aria-label="Increase future classes attended"
+                        >
+                            <Plus className="h-4 w-4" />
+                        </Button>
+                        </div>
+                    </div>
+
+                    {projectedFuturePercentage !== null && (
+                        <div className="mt-4 space-y-3 text-center">
+                        <p className="text-foreground">
+                            If you attend <strong className="text-primary">{attendingFutureClassesCount}</strong> and miss <strong className="text-destructive">{classesLeftForDebar - (attendingFutureClassesCount ?? 0)}</strong> class(es):
+                        </p>
+                        <div>
+                            <p className="text-base sm:text-lg font-semibold text-foreground">Your Projected Attendance:</p>
+                            <p className="text-3xl sm:text-4xl font-bold text-primary tabular-nums my-1">
+                            {projectedFuturePercentage.toFixed(2)}%
+                            </p>
+                            <Progress value={projectedFuturePercentage} className="mt-2 h-2 sm:h-2.5 [&>div]:bg-primary rounded-full" aria-label={`Projected Attendance: ${projectedFuturePercentage.toFixed(2)}%`} />
+                        </div>
+                        
+                        {projectedFutureEligible !== null && (
+                            <div
+                            role="status"
+                            aria-live="polite"
+                            className={`mt-3 p-3 rounded-md w-full text-center text-base font-semibold
+                                ${ projectedFutureEligible 
+                                ? 'bg-accent/10 text-accent border border-accent/30' 
+                                : 'bg-destructive/10 text-destructive border border-destructive/30'
+                                }`}
+                            >
+                            {projectedFutureEligible ? (
+                                <div className="flex items-center justify-center gap-2">
+                                <CheckCircle2 className="h-5 w-5 text-accent flex-shrink-0" />
+                                <span>You will be eligible for exams.</span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-center gap-2">
+                                <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
+                                <span>You will not be eligible for exams.</span>
+                                </div>
+                            )}
+                            </div>
+                        )}
+                        </div>
+                    )}
+                    </div>
+                </CardContent>
+                )}
+                 <CardFooter className="p-6 pt-0">
+                    <Button 
+                        variant="outline" 
+                        onClick={handleResetAll} 
+                        className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Reset All
+                    </Button>
+                </CardFooter>
+            </Card>
         </div>
       </div>
        <footer className="mt-8 text-center text-xs sm:text-sm text-muted-foreground">
@@ -816,3 +889,6 @@ export default function AttendancePage() {
     </div>
   );
 }
+
+
+    
