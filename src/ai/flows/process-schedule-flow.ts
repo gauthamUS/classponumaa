@@ -54,13 +54,15 @@ const schedulePrompt = ai.definePrompt({
     **Analysis Steps:**
 
     1.  **Analyze the Weekly Timetable for the Course:**
-        *   Look for the specific course code '{{{courseCode}}}' inside green-colored boxes in the timetable image.
-        *   For each green box that contains the course code, look at the very first column of that same row to identify the day of the week (e.g., MON, TUE, WED, THU, FRI).
+        *   Look for cells inside green-colored boxes in the timetable image that contain the course code '{{{courseCode}}}'.
+        *   **Crucially, you must perform an EXACT, case-sensitive match for the course code substring.** For example, if the course code is 'BCSE301P', you must find a cell containing 'BCSE301P'. Do NOT match 'BCSE301L' or any other variation. The course code must be present in the cell's text exactly as provided.
+        *   If a cell contains multiple course codes, only consider it a match if '{{{courseCode}}}' is present exactly. Ignore other course codes in the same cell.
+        *   For each green box with an exact match, look at the very first column of that same row to identify the day of the week (e.g., MON, TUE, WED, THU, FRI).
         *   List the full weekdays that have classes for this course. For example: If classes are on TUE, THU, FRI, the output should be ["Tuesday", "Thursday", "Friday"].
 
     2.  **Extract Non-Instructional Days from the Academic Calendar:**
         *   Scan the academic calendar PDF thoroughly.
-        *   Identify all dates marked as "No instructional day", "Holiday", "Continuous Assessment Test - I", or "Continuous Assessment Test - II".
+        *   Identify all dates marked as "No instructional day", "Holiday", "Continuous Assessment Test - I", "Continuous Assessment Test - II", or "TechnoVIT".
         *   **Important**: If any of these are specified as a date range (e.g., "September 10-15" or "October 2-4"), keep the range as is in the output. Do not expand it.
         *   Create a list of all these dates. For each entry, provide the date (or date range) and the specific reason (e.g., "Holiday", "CAT-I").
 
@@ -75,7 +77,7 @@ const schedulePrompt = ai.definePrompt({
     *   In the 'nonInstructionalDays' array, provide the list of dates/ranges and reasons you extracted.
     *   In the 'lastInstructionalDay' field, provide the date you found.
     *   In the 'reason' field, provide a brief summary of your findings, for example: "Based on the timetable, classes for {{{courseCode}}} are on Tuesdays, Thursdays, and Fridays."
-    *   If you cannot determine the days, return an empty 'classDays' array and explain the issue in the 'reason' field.
+    *   If you cannot find an exact match for the course code, return an empty 'classDays' array and explain the issue in the 'reason' field.
 
     **Image and PDF Input:**
 
@@ -92,13 +94,29 @@ const processScheduleFlow = ai.defineFlow(
     outputSchema: ProcessScheduleOutputSchema,
   },
   async (input) => {
-    const { output } = await schedulePrompt(input);
-    if (!output) {
-      return {
-        classDays: [],
-        reason: "The AI model did not return a valid response. Please check if the documents are clear and try again."
-      };
+    try {
+        const { output } = await schedulePrompt(input);
+        if (!output) {
+          return {
+            classDays: [],
+            reason: "The AI model did not return a valid response. Please check if the documents are clear and try again."
+          };
+        }
+        return output;
+    } catch (e: any) {
+        console.error("Error in processScheduleFlow:", e);
+        // Check for a specific error message indicating an overloaded service.
+        if (e.message && e.message.includes('503')) {
+            return {
+                classDays: [],
+                reason: "The AI service is currently overloaded. Please wait a moment and try again."
+            };
+        }
+        // Return a generic error for other issues.
+        return {
+            classDays: [],
+            reason: "An unexpected error occurred while processing the schedule. Please ensure your documents are clear and try again."
+        };
     }
-    return output;
   }
 );
